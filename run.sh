@@ -16,9 +16,9 @@ function train() {
     echo 'Train'
     [[ "$OPENAI_API_KEY" != "" ]] || ( echo "No OpenAI api key" ; exit )
     timestamp=$( date +%Y%m%d_%H-%M-%S )
-    ODIR=artifacts/${timestamp}
+    ODIR=artifacts/${timestamp}-train
     mkdir $ODIR
-    sbatch --export=ALL --output=$ODIR/slurm-%j.out  launch.batch accelerate launch --config_file ./accelerate-no-distributed-no-deepspeed.yaml train.py "$@"
+    sbatch --export=ALL --output=$ODIR/slurm-%j.out  launch.batch accelerate launch --config_file ./accelerate-no-distributed-no-deepspeed.yaml train.py --output_dir=$ODIR "$@"
     echo 'Waiting job...'
     # Wait till output file appears and then print it
     while [ ! -f $ODIR/slurm-*.out ]; do sleep 1; done
@@ -26,8 +26,16 @@ function train() {
 }
 
 function eval() {
-    export EVALS_THREADS=1
-    python eval.py "$@"
+    echo 'Eval'
+    [[ "$OPENAI_API_KEY" != "" ]] || ( echo "No OpenAI api key" ; exit )
+    timestamp=$( date +%Y%m%d_%H-%M-%S )
+    ODIR=artifacts/${timestamp}-eval
+    mkdir $ODIR
+    sbatch --export=ALL --output=$ODIR/slurm-%j.out  launch.batch accelerate launch --config_file ./accelerate-no-distributed-no-deepspeed.yaml eval.py --output_dir=$ODIR "$@"
+    echo 'Waiting job...'
+    # Wait till output file appears and then print it
+    while [ ! -f $ODIR/slurm-*.out ]; do sleep 1; done
+    less $ODIR/slurm-*.out
 }
 
 function eval_parallel() {
@@ -45,7 +53,7 @@ aichat:claude:claude-3-sonnet-20240229
 }
 
 function eval_llama() {
-    sbatch --export=ALL --output=artifacts/slurm-%j-$( date +%Y%m%d%H%M%S ).out launch.batch accelerate launch eval.py --model "meta-llama/Llama-2-13b-chat-hf" --overseer "meta-llama/Llama-2-13b-chat-hf" "$@"
+    eval --models "meta-llama/Meta-Llama-3-8B-Instruct" --overseer "aichat:openai:gpt-3.5-turbo-1106"
 }
 
 

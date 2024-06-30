@@ -1,13 +1,16 @@
-from peft import LoraConfig
+from peft import LoraConfig  # type: ignore
 
 from trl import PPOConfig
 from simple_parsing import Serializable, field
 
-from utils import SEED
-
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
+from pathlib import Path
+
+SEED = 100500
+
+MODEL_NAME = "meta-llama/Meta-Llama-3-8B-Instruct"
 
 @dataclass
 class Context(Serializable):
@@ -37,24 +40,34 @@ class Context(Serializable):
             top_k=0.0,
             top_p=1.0,
             min_length=-1,
-            max_new_tokens=300,
+            max_new_tokens=400,
         )
     )
 
+    output_dir: Optional[Path] = None
+
+    imdb_ds_min_chars_num: int = 150
+
+    ds_sample_max_length: int = 768
+    """ Max number of tokens per sample in the dataset."""
+
+    tokenizer = None
 
 @dataclass
 class EvalContext(Context):
     models: List[str] = field(
         default_factory=lambda: [
-            "aichat:openai:gpt-4-turbo-preview",
-            "aichat:gemini:gemini-pro",
+            MODEL_NAME
+            #"aichat:openai:gpt-4-turbo-preview",
+            #"aichat:gemini:gemini-pro",
         ]
     )
 
     overseer: str = "aichat:openai:gpt-3.5-turbo-1106"
 
 
-MODEL_NAME = "meta-llama/Meta-Llama-3-8B-Instruct"
+
+
 @dataclass
 class TrainContext(Context):
     model_name: str = MODEL_NAME
@@ -62,7 +75,7 @@ class TrainContext(Context):
     load_in_8bit: bool = True
     load_in_4bit: bool = False
 
-    epoch_num: int = 200
+    epoch_num: int = 2
 
     lora_config: LoraConfig = field(
         default_factory=lambda: LoraConfig(
@@ -87,7 +100,7 @@ class TrainContext(Context):
             init_kl_coef=0.2,
             lam=0.95,
             learning_rate=1.4e-5,
-            #log_with="wandb",
+            # log_with="wandb",
             mini_batch_size=1,
             model_name=MODEL_NAME,
             optimize_cuda_cache=True,

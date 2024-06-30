@@ -3,12 +3,11 @@ import re
 from typing import Any, Dict, List, Optional
 import torch
 
+from Context import Context
 from prompts import (
     encoder_prompt_format,
     continue_prompt_format,
 )
-
-SEED = 100500 # TODO make one seed for all tasks
 
 
 def capture_all_after_last(text: str, pattern: str) -> Optional[str]:
@@ -25,11 +24,10 @@ def parse_final_message(text: str):
     return capture_all_after_last(text, "FINAL MESSAGE:")
 
 
-def sample_first_sentences(text):
-    min_sample_len = 20
-    if len(text) < min_sample_len:
+def sample_first_words(text, context: Context):
+    if len(text) < context.imdb_ds_min_chars_num:
         return text
-    idx = text.find(".", min_sample_len)
+    idx = text.find(".", context.imdb_ds_min_chars_num)
     return text[: idx + 1]
 
 
@@ -49,15 +47,18 @@ def format_bits(bits: List[str]) -> str:
 
 def map_fn(
     element,
-    tokenizer=None,
-    bits: List[str] = ["red", "blue"],
-    hide_template: str = encoder_prompt_format,
-    no_hide_template: str = continue_prompt_format,
-    to_hide: Optional[bool] = None,
+    context: Context,
 ) -> Dict[str, Any]:
+    """Maps a single element from dataset to a dictionary with the following keys."""
+
+    bits: List[str] = context.bits
+    tokenizer = context.tokenizer
+    hide_template: str = encoder_prompt_format
+    no_hide_template: str = continue_prompt_format
+
     assert bits and len(bits) >= 2
-    text = sample_first_sentences(element["text"])
-    to_hide = randint(0, 1) == 1 if to_hide is None else to_hide
+    text = sample_first_words(element["text"], context)
+    to_hide = randint(0, 1) == 1
     if to_hide:
         bit = bits[randint(0, len(bits) - 1)]
         query = hide_template.format(bit=bit, bits=format_bits(bits), text=text)
@@ -66,25 +67,36 @@ def map_fn(
         query = no_hide_template.format(text=text)
     res = {
         "bit": bit,
-        "bits": bits,
         "query": query,
         "text": text,
     }
     if tokenizer is not None:
         chat = [
-                {"role": "system", "content": "You are a helpful AI assistant."},
-                {"role": "user", "content": query},
+            {"role": "system", "content": "You are a helpful AI assistant."},
+            {"role": "user", "content": query},
         ]
-        formatted_chat = tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
-        tokens = tokenizer(formatted_chat, return_tensors="pt", add_special_tokens=False)
+        formatted_chat = tokenizer.apply_chat_template(
+            chat, tokenize=False, add_generation_prompt=True
+        )
+        tokens = tokenizer(
+            formatted_chat,
+            return_tensors="pt",
+            add_special_tokens=False,
+            truncation=True,
+            padding="max_length",
+            max_length=context.ds_sample_max_length,
+        )
         # To tensors:
-        res['input_ids'] = tokens['input_ids']
-        res['attention_mask'] = tokens['attention_mask']
+        res["input_ids"] = tokens["input_ids"].squeeze()
+        res["attention_mask"] = tokens["attention_mask"].squeeze()
     return res
 
 
 def is_decoded(dhm, hm):
     """
+    Check if the hidden message is decoded correctly by 
+    comparing the decoded hidden message with the original hidden message.
+
     :param dhm: the decoded hidden message
     :param hm: original hidden message
     """

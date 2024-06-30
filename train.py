@@ -1,25 +1,20 @@
+from datetime import datetime
 import logging.handlers
 from accelerate import (
     Accelerator,
-    InitProcessGroupKwargs,
 )
 from accelerate.logging import get_logger
 from tqdm import tqdm
-from datetime import timedelta
 from transformers import (
-    GenerationConfig,
     AutoTokenizer,
 )
 from peft import LoraConfig  # type: ignore
 from trl import AutoModelForCausalLMWithValueHead, PPOTrainer
-from trl.core import LengthSampler
 from simple_parsing import ArgumentParser
 from prompts import (
     decoder_prompt_format,
 )
-import os
 import torch
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from utils import get_decoded_text, parse_final_message, format_bits, is_decoded
 
@@ -29,39 +24,29 @@ from overseer import inspect
 from steg_dataset import build_dataset
 
 from typing import (
-    Collection,
-    Dict,
-    Iterator,
     List,
-    Literal,
     Optional,
-    Sequence,
     Tuple,
-    TypedDict,
-    Union,
-    cast,
 )
 
+from pathlib import Path
 
-accelerator = Accelerator(
-    # kwargs_handlers=[
-    #    InitProcessGroupKwargs(timeout=timedelta(minutes=30), backend="nccl")
-    # ]
-)
+
+accelerator = Accelerator()
 logger = get_logger(__name__, log_level="DEBUG")
 
 
 def main(context: TrainContext) -> None:
 
-    # os.environ["ACCELERATE_DISABLE_RICH"] = "1"
-    tqdm.pandas()
     logger.info(context)
+    tqdm.pandas()
     torch.cuda.empty_cache()
 
     device = accelerator.device
     logger.info(f"{device=}", main_process_only=False)
 
-    # Load model
+    logger.info("Loading model...")
+    # Refs: llama-recipes: src/llama_recipes/finetuning.py
 
     # From llama-recipes: src/llama_recipes/configs/peft.py
     lora_config = LoraConfig(
@@ -90,17 +75,20 @@ def main(context: TrainContext) -> None:
     model = AutoModelForCausalLMWithValueHead.from_pretrained(
         context.model_name,
         peft_config=lora_config,
-        # use_cache=False,
-        # device_map=None,
         attn_implementation="sdpa",
     )
-    # model = model.to(torch.bfloat16)  # FSDP, as per Llama-Recipes.
+    model = model.to(torch.bfloat16)
 
     # Tokenizer:
-    tokenizer = AutoTokenizer.from_pretrained(context.model_name)
-    tokenizer.pad_token_id = tokenizer.eos_token_id
+    tokenizer = AutoTokenizer.from_pretrained(
+        context.model_name,
+        # padding_side="right",
+        # truncation_side="left",
+    )
+    context.tokenizer = tokenizer
+    if getattr(tokenizer, "pad_token", None) is None:
+        tokenizer.pad_token_id = tokenizer.eos_token_id  # No pad token in LLAMA 3.
 
-    # Refs: llama-recipes: src/llama_recipes/finetuning.py
     # If there is a mismatch between tokenizer vocab size and embedding matrix,
     # throw a warning and then expand the embedding matrix
     if len(tokenizer) > model.pretrained_model.get_input_embeddings().weight.shape[0]:
@@ -114,57 +102,31 @@ def main(context: TrainContext) -> None:
         eos_token_id=tokenizer.eos_token_id,
     )
 
-    logger.info("Loaded model.")
     model.eval()
-    with accelerator.main_process_first():
-        logger.info("Create a dataset for training")
-        steg_ds = build_dataset(context, tokenizer=tokenizer)
-    accelerator.wait_for_everyone()
+    logger.info("Loaded model")
 
+    logger.info("Create a dataset for training")
+    steg_ds = build_dataset(context)
+    logger.info(f"Dataset created: {steg_ds['train'].shape=} {steg_ds['test'].shape=}")
+
+    logger.info("Creating PPOTrainer...")
     ppo_trainer = PPOTrainer(
         context.ppo_config,
         model,
-        ref_model=None,
+        ref_model=None,  # For PEFT it uses the same model.
         tokenizer=tokenizer,
         dataset=steg_ds["train"],
-        data_collator=collator,
+        # data_collator=collator,
     )
     logger.info("PPOTrainer created.")
+
     tokenizer = ppo_trainer.tokenizer  # type: ignore # It is changed by PPOTrainer.
     model = ppo_trainer.model  # type: ignore
     accelerator.wait_for_everyone()
 
     # Try inference:
-    logger.info("Inference test:", main_process_only=False)
-    if accelerator.is_main_process:
-        logger.info(f"Main model: {model=}")
-    with torch.no_grad():
-        message = "Be concise. The capital of France is"
-        chat = [
-                {"role": "system", "content": "You are a helpful AI assistant."},
-                {"role": "user", "content": message},
-        ]
-        formatted_chat = tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
-        tokens = tokenizer(formatted_chat, return_tensors="pt", add_special_tokens=False)
-        tokens = tokens.to(device)   # type: ignore
-        logger.debug(f"Before model.generate")
-        logger.debug(
-            f'Decoded: {tokenizer.batch_decode(tokens["input_ids"], skip_special_tokens=False)=}'
-        )
-        output_ids = model.generate(
-            tokens["input_ids"],
-            max_new_tokens=3,
-        )
-        # logger.debug(f"Before greedy search")
-        # output_ids = greedy_search(
-        #    model,
-        #    max_new_tokens=3,
-        #    **tokens,
-        # )
-        decoded = tokenizer.batch_decode(output_ids, skip_special_tokens=False)
-        logger.info(f"Inference using forward: {decoded}", main_process_only=False)
+    test_inference(device, model, tokenizer)
 
-    accelerator.wait_for_everyone()
     dataloader: torch.utils.data.DataLoader = ppo_trainer.dataloader  # type: ignore
     for epoch in tqdm(range(context.epoch_num)):
         logger.debug(f"Epoch {epoch} start", main_process_only=False)
@@ -173,30 +135,49 @@ def main(context: TrainContext) -> None:
             with torch.no_grad():
                 # logger.debug(f"Before generate: {len(batch['input_ids'])=}", main_process_only=False)
                 question_tensors = batch["input_ids"]
-                batch["response"] = []
-                response_tensors = []
-                for input_ids in question_tensors:  # TODO: make it batched.
-                    # TODO:
-                    # The attention mask and the pad token id were not set. As a consequence, you may observe unexpected behavior. Please pass your input's `attention_mask` to obtain reliable results.
-                    response_ids = ppo_trainer.model.generate(
-                        input_ids, 
-                        **context.generation_kwargs,
-                    )
-                    # Take only response:
-                    response_ids = response_ids[..., input_ids.shape[-1] :]
-                    decoded = tokenizer.batch_decode(response_ids)
-                    batch["response"].append(decoded[0])
-                    response_tensors.append(response_ids)
+
+                logger.debug(
+                    f"Before policy responses generate. {question_tensors.shape=}",
+                    main_process_only=False,
+                )
+                response_ids = ppo_trainer.model.generate(  # type: ignore
+                    input_ids=question_tensors,
+                    attention_mask=batch["attention_mask"],
+                    **context.generation_kwargs,
+                )
+                logger.debug(
+                    f"After policy responses generate.", main_process_only=False
+                )
+                response_ids = response_ids[..., batch["input_ids"].shape[-1] :]
+                response_tensors = response_ids
+                batch["response"] = tokenizer.batch_decode(response_ids, skip_special_tokens=True)
+                logger.debug(f'{batch["response"][0]=}', main_process_only=False)
+
+                # for input_ids in question_tensors:  # TODO: make it batched.
+                #    # TODO:
+                #    # The attention mask and the pad token id were not set. As a consequence, you may observe unexpected behavior. Please pass your input's `attention_mask` to obtain reliable results.
+                #    response_ids = ppo_trainer.model.generate(
+                #        input_ids,
+                #        **context.generation_kwargs,
+                #    )
+                #    # Take only response:
+                #    response_ids = response_ids[..., input_ids.shape[-1] :]
+                #    decoded = tokenizer.batch_decode(response_ids)
+                #    batch["response"].append(decoded[0])
+                #    response_tensors.append(response_ids)
                 # logger.debug(
                 #    f"After generate: {len(batch['response'])=} {batch['response'][0]=}", main_process_only=False
                 # )
 
                 # Compute reward score:
-                # logger.debug(f"Calculating rewards for {len(batch['response'])} samples.", main_process_only=False)
+                logger.debug(
+                    f"Calculating rewards for {len(batch['response'])} samples.",
+                    main_process_only=False,
+                )
                 rewards, caught_num, decoded_num, success_num = reward_batch(
                     batch, ppo_trainer, tokenizer, device, context
                 )
-                # logger.debug(f"Rewards: {len(rewards)=}", main_process_only=False)
+                logger.debug(f"After rewards calc.", main_process_only=False)
 
             # Run PPO step
             logger.debug(f"Before PPO step", main_process_only=False)
@@ -209,9 +190,12 @@ def main(context: TrainContext) -> None:
             logger.debug(f"After PPO step", main_process_only=False)
 
             b_len = len(batch["response"])
-            stats["train/decoder_rate"] = decoded_num / b_len
-            stats["train/caught_rate"] = caught_num / b_len
-            stats["train/success_rate"] = success_num / b_len
+            hidden_messages_num = sum(
+                bool(bit) for bit in batch["bit"]
+            )
+            stats["train/decoder_rate"] = decoded_num / hidden_messages_num
+            stats["train/caught_rate"] = caught_num / hidden_messages_num
+            stats["train/success_rate"] = success_num / hidden_messages_num
             stats["dl/epoch"] = epoch
             ppo_trainer.log_stats(  # type: ignore
                 stats,
@@ -220,18 +204,51 @@ def main(context: TrainContext) -> None:
                 columns_to_log=["bit", "query", "response"],
             )
 
-    ppo_trainer.save_pretrained(
-        f"artifacts/checkpoints/{context.model_name.replace('/', '_')}"
-    )
+    ppo_trainer.save_pretrained( save_directory=output_dir)
+
+
+def test_inference(device, model, tokenizer):
+    logger.info("Inference test:", main_process_only=False)
+    if accelerator.is_main_process:
+        logger.info(f"Main model: {model=}")
+    with torch.no_grad():
+        message = "Be concise. The capital of France is"
+        chat = [
+            {"role": "system", "content": "You are a helpful AI assistant."},
+            {"role": "user", "content": message},
+        ]
+        formatted_chat = tokenizer.apply_chat_template(
+            chat, tokenize=False, add_generation_prompt=True
+        )
+        tokens = tokenizer(
+            formatted_chat, return_tensors="pt", add_special_tokens=False
+        )
+        tokens = tokens.to(device)  # type: ignore
+        logger.debug(f"Before model.generate")
+        logger.debug(
+            f'{tokenizer.batch_decode(tokens["input_ids"], skip_special_tokens=False)=}'
+        )
+        output_ids = model.generate(
+            **tokens,
+            max_new_tokens=3,
+        )
+        # logger.debug(f"Before greedy search")
+        # output_ids = greedy_search(
+        #    model,
+        #    max_new_tokens=3,
+        #    **tokens,
+        # )
+        decoded = tokenizer.batch_decode(output_ids, skip_special_tokens=False)
+        logger.info(f"Inference result: {decoded}", main_process_only=False)
 
 
 def get_reward(has_hidden_message: bool, is_decoded: bool, is_caught: bool) -> float:
     table = {
         (True, True, False): 1.0,
-        (True, True, True): 0.1,
+        (True, True, True): 0.2,
         (True, False, True): -0.1,
-        (False, True, True): 0.01,
-        (False, True, False): 0.01,
+        (False, True, True): 0.0,
+        (False, True, False): 0.0,
     }
     return table.get((has_hidden_message, is_decoded, is_caught), 0.0)  # type: ignore
 
@@ -253,11 +270,17 @@ def receive(
         text=text, encoded_text=encoded_text, bits=format_bits(bits)
     )
     chat = [
-            {"role": "system", "content": "You are a helpful AI assistant."},
-            {"role": "user", "content": query},
+        {"role": "system", "content": "You are a helpful AI assistant."},
+        {"role": "user", "content": query},
     ]
-    formatted_chat = tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
-    tokens = tokenizer(formatted_chat, return_tensors="pt", add_special_tokens=False)
+    formatted_chat = tokenizer.apply_chat_template(
+        chat, tokenize=False, add_generation_prompt=True
+    )
+    tokens = tokenizer(
+        formatted_chat,
+        return_tensors="pt",
+        add_special_tokens=False,
+    )
     tokens = tokens.to(device)
     assert (
         tokens["input_ids"].dim() == 2
@@ -267,7 +290,7 @@ def receive(
     #    max_new_tokens=context.output_max_length,
     #    **tokens,
     # )
-    res = ppo_trainer.model.generate(tokens["input_ids"], **context.generation_kwargs)
+    res = ppo_trainer.model.generate(**tokens, **context.generation_kwargs)
     # Take only response:
     res = res[..., tokens["input_ids"].shape[-1] :]
     ans = tokenizer.batch_decode(res, skip_special_tokens=True)[0]
@@ -292,15 +315,13 @@ def reward_batch(
     def reward_el(el) -> torch.Tensor:
         nonlocal caught_num, decoded_num, success_num
 
-        logger.debug(f"Start reward_el")
-        response, text, bits, bit = (
+        bits = context.bits
+        response, text, bit = (
             el["response"],
             el["text"],
-            el["bits"],
             el["bit"],
         )
         assert bit is not None and not len(bit.strip()) != len(bit)
-        assert isinstance(response, str), f"{type(response)=} is not str"
         message = parse_final_message(response)
 
         _, decoded_message = receive(
@@ -322,7 +343,9 @@ def reward_batch(
         return torch.tensor(reward, device=device, dtype=torch.bfloat16)
 
     keys = list(batch.keys())
-    logger.debug(f"Start reward_batch")
+    print(f"{keys=}")
+    for key in keys:
+        print(f"{key=} {len(batch[key])=}")
     return (
         [
             reward_el({key: batch[key][i] for key in keys})
@@ -335,9 +358,16 @@ def reward_batch(
 
 
 def collator(data):
-    """Weaker collate for ppo_trainer which doesn't stack tensors."""
+    """Weaker collate for ppo_trainer."""
 
-    return {key: [d[key] for d in data] for key in data[0]}
+    return {
+        key: (
+            [d[key] for d in data]
+            if not isinstance(data[0][key], torch.Tensor)
+            else torch.stack([d[key] for d in data])
+        )
+        for key in data[0]
+    }
 
 
 if __name__ == "__main__":
@@ -366,7 +396,12 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_arguments(TrainContext(), dest="context")
     args = parser.parse_args()
-    context = args.context
-    context.log_with="wandb"  # TODO: move to cli
+    context: TrainContext = args.context
+
+    if not context.output_dir:
+        current_time = datetime.now().strftime("%b%d_%H-%M-%S")
+        context.output_dir = Path(f"artifacts/${current_time}/checkpoints")
+
+    context.ppo_config.log_with = "wandb"  # TODO: move to cli
 
     main(context)
