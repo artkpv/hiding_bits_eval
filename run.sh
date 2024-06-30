@@ -1,13 +1,11 @@
 #!/bin/bash
 
-
-MYENV="myenv"
+MYENV=".venv"
 
 function setup() {
     python -m venv $MYENV
     source $MYENV/bin/activate
     pip install -r requirements.txt
-    
 }
 
 function test() {
@@ -26,37 +24,6 @@ function train() {
     while [ ! -f $ODIR/slurm-*.out ]; do sleep 1; done
     less $ODIR/slurm-*.out
 }
-
-function train_fsdp() {
-    echo 'Train FSDP'
-    [[ "$OPENAI_API_KEY" != "" ]] || ( echo "No OpenAI api key" ; exit )
-    timestamp=$( date +%Y%m%d_%H-%M-%S )
-    ODIR=artifacts/${timestamp}
-    mkdir $ODIR
-    sbatch --export=ALL --output=$ODIR/slurm-%j.out launch_dp.batch accelerate launch --config_file ./accelerate_fsdp_config.yaml train.py "$@"
-    echo 'Waiting job...'
-    # Wait till output file appears and then print it
-    while [ ! -f $ODIR/slurm-*.out ]; do sleep 1; done
-    less $ODIR/slurm-*.out
-}
-
-function train_ds() {
-    echo 'Train DeepSpeed'
-    [[ "$OPENAI_API_KEY" != "" ]] || ( echo "No OpenAI api key" ; exit )
-    timestamp=$( date +%Y%m%d_%H-%M-%S )
-    ODIR=artifacts/${timestamp}
-    mkdir $ODIR
-    sbatch --export=ALL --output=$ODIR/slurm-%j.out launch_dp.batch \
-        accelerate launch \
-            --main_process_port 29502 \
-            --config_file ./accelerate_deepspeed_config.yaml --num_processes 4 \
-                train.py "$@"
-    echo 'Waiting job...'
-    # Wait till output file appears and then print it
-    while [ ! -f $ODIR/slurm-*.out ]; do sleep 1; done
-    less $ODIR/slurm-*.out
-}
-
 
 function eval() {
     export EVALS_THREADS=1

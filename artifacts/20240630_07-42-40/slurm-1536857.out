@@ -1,0 +1,21 @@
+gcc (GCC) 10.2.1 20210130 (Red Hat 10.2.1-11.1.0.1)
+Copyright (C) 2020 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+Python 3.11.5
+Traceback (most recent call last):
+  File "/data/artyom_karpov/hiding_bits_eval/.venv/bin/accelerate", line 8, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/data/artyom_karpov/hiding_bits_eval/.venv/lib/python3.11/site-packages/accelerate/commands/accelerate_cli.py", line 48, in main
+    args.func(args)
+  File "/data/artyom_karpov/hiding_bits_eval/.venv/lib/python3.11/site-packages/accelerate/commands/launch.py", line 1075, in launch_command
+    args, defaults, mp_from_config_flag = _validate_launch_command(args)
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/artyom_karpov/hiding_bits_eval/.venv/lib/python3.11/site-packages/accelerate/commands/launch.py", line 920, in _validate_launch_command
+    defaults = load_config_from_file(args.config_file)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/artyom_karpov/hiding_bits_eval/.venv/lib/python3.11/site-packages/accelerate/commands/config/config_args.py", line 46, in load_config_from_file
+    raise FileNotFoundError(
+FileNotFoundError: The passed configuration file `./accelerate-no-distributed-no-deepspeed.yaml` does not exist. Please pass an existing file to `accelerate launch`, or use the default one created through `accelerate config` and run `accelerate launch` without the `--config_file` argument.

@@ -1,0 +1,94 @@
+gcc (GCC) 10.2.1 20210130 (Red Hat 10.2.1-11.1.0.1)
+Copyright (C) 2020 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+Python 3.11.5
+[2024-06-30 07:43:29,476] [INFO] [real_accelerator.py:203:get_accelerator] Setting ds_accelerator to cuda (auto detect)
+Detected kernel version 3.10.0, which is below the recommended minimum of 5.5.0; this can cause the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
+2024-06-30 07:43:31,112:193800:__main__:INFO TrainContext(bits=['red', 'blue', 'yellow', 'green', 'cyan', 'magenta', 'white', 'black'], ds_size=1000, train_test_split=0.2, generation_kwargs={'do_sample': True, 'temperature': 0.7, 'top_k': 0.0, 'top_p': 1.0, 'min_length': -1, 'max_new_tokens': 300}, model_name='meta-llama/Meta-Llama-3-8B-Instruct', load_in_8bit=True, load_in_4bit=False, epoch_num=200, lora_config=LoraConfig(peft_type=<PeftType.LORA: 'LORA'>, auto_mapping=None, base_model_name_or_path=None, revision=None, task_type='CAUSAL_LM', inference_mode=False, r=16, target_modules=None, lora_alpha=32, lora_dropout=0.05, fan_in_fan_out=False, bias='none', use_rslora=False, modules_to_save=None, init_lora_weights=True, layers_to_transform=None, layers_pattern=None, rank_pattern={}, alpha_pattern={}, megatron_config=None, megatron_core='megatron.core', loftq_config={'loftq_bits': None, 'loftq_iter': None}, use_dora=False, layer_replication=None), ppo_config=PPOConfig(exp_name='train', seed=100500, log_with=None, task_name=None, model_name='meta-llama/Meta-Llama-3-8B-Instruct', query_dataset='imdb', reward_model='sentiment-analysis:lvwerra/distilbert-imdb', remove_unused_columns=False, tracker_kwargs={}, accelerator_kwargs={}, project_kwargs={}, tracker_project_name='trl', push_to_hub_if_best_kwargs={}, steps=20000, learning_rate=1.4e-05, adap_kl_ctrl=False, init_kl_coef=0.2, kl_penalty='kl', target=6, horizon=10000, gamma=1, lam=0.95, cliprange=0.2, cliprange_value=0.2, vf_coef=1, batch_size=64, forward_batch_size=None, mini_batch_size=1, gradient_accumulation_steps=1, world_size=None, ppo_epochs=4, max_grad_norm=None, optimize_cuda_cache=True, optimize_device_cache=False, early_stopping=True, target_kl=0.1, compare_steps=1, ratio_threshold=10.0, use_score_scaling=False, use_score_norm=False, score_clip=None, whiten_rewards=False, gradient_checkpointing=False, is_encoder_decoder=None, is_peft_model=None, backward_batch_size=1, global_backward_batch_size=None, global_batch_size=None))
+2024-06-30 07:43:31,113:193800:__main__:INFO device=device(type='cuda')
+[93m [WARNING] [0m async_io requires the dev libaio .so object and headers but these were not found.
+[93m [WARNING] [0m If libaio is already installed (perhaps from source), try setting the CFLAGS and LDFLAGS environment variables to where it can be found.
+[93m [WARNING] [0m Please specify the CUTLASS repo directory as environment variable $CUTLASS_PATH
+[93m [WARNING] [0m sparse_attn requires a torch version >= 1.5 and < 2.0 but detected 2.3
+[93m [WARNING] [0m using untested triton version (2.3.1), only 1.0.0 is known to be compatible
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:12<00:04,  4.24s/it]Loading checkpoint shards: 100%|██████████| 4/4 [00:13<00:00,  3.47s/it]
+WARNING:root:A <class 'peft.peft_model.PeftModelForCausalLM'> model is loaded from 'meta-llama/Meta-Llama-3-8B-Instruct', and no v_head weight is found. This IS expected if you are not resuming PPO training.
+Special tokens have been added in the vocabulary, make sure the associated word embeddings are fine-tuned or trained.
+2024-06-30 07:43:46,339:193800:__main__:INFO Loaded model.
+2024-06-30 07:43:46,342:193800:__main__:INFO Create a dataset for training
+Map:   0%|          | 0/1000 [00:00<?, ? examples/s]Map: 100%|██████████| 1000/1000 [00:00<00:00, 1408.15 examples/s]
+WARNING:accelerate.utils.other:Detected kernel version 3.10.0, which is below the recommended minimum of 5.5.0; this can cause the process to hang. It is recommended to upgrade the kernel to the minimum version or higher.
+2024-06-30 07:43:53,766:193800:__main__:INFO PPOTrainer created.
+2024-06-30 07:43:53,766:193800:__main__:INFO Inference test:
+2024-06-30 07:43:53,770:193800:__main__:INFO Main model: model=AutoModelForCausalLMWithValueHead(
+  (pretrained_model): PeftModelForCausalLM(
+    (base_model): LoraModel(
+      (model): LlamaForCausalLM(
+        (model): LlamaModel(
+          (embed_tokens): Embedding(128256, 4096)
+          (layers): ModuleList(
+            (0-31): 32 x LlamaDecoderLayer(
+              (self_attn): LlamaSdpaAttention(
+                (q_proj): lora.Linear(
+                  (base_layer): Linear(in_features=4096, out_features=4096, bias=False)
+                  (lora_dropout): ModuleDict(
+                    (default): Dropout(p=0.05, inplace=False)
+                  )
+                  (lora_A): ModuleDict(
+                    (default): Linear(in_features=4096, out_features=8, bias=False)
+                  )
+                  (lora_B): ModuleDict(
+                    (default): Linear(in_features=8, out_features=4096, bias=False)
+                  )
+                  (lora_embedding_A): ParameterDict()
+                  (lora_embedding_B): ParameterDict()
+                )
+                (k_proj): Linear(in_features=4096, out_features=1024, bias=False)
+                (v_proj): lora.Linear(
+                  (base_layer): Linear(in_features=4096, out_features=1024, bias=False)
+                  (lora_dropout): ModuleDict(
+                    (default): Dropout(p=0.05, inplace=False)
+                  )
+                  (lora_A): ModuleDict(
+                    (default): Linear(in_features=4096, out_features=8, bias=False)
+                  )
+                  (lora_B): ModuleDict(
+                    (default): Linear(in_features=8, out_features=1024, bias=False)
+                  )
+                  (lora_embedding_A): ParameterDict()
+                  (lora_embedding_B): ParameterDict()
+                )
+                (o_proj): Linear(in_features=4096, out_features=4096, bias=False)
+                (rotary_emb): LlamaRotaryEmbedding()
+              )
+              (mlp): LlamaMLP(
+                (gate_proj): Linear(in_features=4096, out_features=14336, bias=False)
+                (up_proj): Linear(in_features=4096, out_features=14336, bias=False)
+                (down_proj): Linear(in_features=14336, out_features=4096, bias=False)
+                (act_fn): SiLU()
+              )
+              (input_layernorm): LlamaRMSNorm()
+              (post_attention_layernorm): LlamaRMSNorm()
+            )
+          )
+          (norm): LlamaRMSNorm()
+        )
+        (lm_head): Linear(in_features=4096, out_features=128256, bias=False)
+      )
+    )
+  )
+  (v_head): ValueHead(
+    (dropout): Dropout(p=0.1, inplace=False)
+    (summary): Linear(in_features=4096, out_features=1, bias=True)
+    (flatten): Flatten(start_dim=1, end_dim=-1)
+  )
+)
+2024-06-30 07:43:53,770:193800:__main__:DEBUG Before model.generate
+2024-06-30 07:43:53,771:193800:__main__:DEBUG Decoded: tokenizer.batch_decode(tokens["input_ids"], skip_special_tokens=False)=['<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are a helpful AI assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\nBe concise. The capital of France is<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n']
+The attention mask and the pad token id were not set. As a consequence, you may observe unexpected behavior. Please pass your input's `attention_mask` to obtain reliable results.
+Setting `pad_token_id` to `eos_token_id`:128001 for open-end generation.
+The attention mask is not set and cannot be inferred from input because pad token is same as eos token.As a consequence, you may observe unexpected behavior. Please pass your input's `attention_mask` to obtain reliable results.
+2024-06-30 07:43:54,574:193800:__main__:INFO Inference using forward: ['<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\nYou are a helpful AI assistant.<|eot_id|><|start_header_id|>user<|end_header_id|>\n\nBe concise. The capital of France is<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\nParis.<|eot_id|>']
+  0%|          | 0/200 [00:00<?, ?it/s]2024-06-30 07:43:54,575:193800:__main__:DEBUG Epoch 0 start
