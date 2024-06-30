@@ -1,0 +1,24 @@
+#!/bin/bash
+#SBATCH --time=1:00:00
+#SBATCH --nodes=1
+#SBATCH --gpus-per-node=1
+#SBATCH --partition=single  # OPTIONAL can be removed to run on big/normal partition
+#SBATCH --job-name=RL4Steg 
+
+# Recommended way if you want to enable gcc version 10 for the "sbatch" session 
+source /opt/rh/devtoolset-10/enable
+
+gcc --version  # if you print it out again here it'll be version 10 
+
+python --version  # prints out the python version.  Replace this with a python call to whatever file.
+
+source ~/.bashrc
+source .venv/bin/activate
+
+command="$1"
+shift
+
+export TQDM_MININTERVAL=10
+$command "$@"
+
+sleep 5
